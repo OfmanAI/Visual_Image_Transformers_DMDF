@@ -134,7 +134,7 @@ if __name__ == "__main__":
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='Path to latest checkpoint (default: none).')
     parser.add_argument('--dataset', type=str, default='All', 
-                        help="Which dataset to use (Deepfakes|Face2Face|FaceShifter|FaceSwap|NeuralTextures|All)")
+                        help="Which dataset to use (Deepfakes|Face2Face|FaceShifter|FaceSwap|NeuralTextures|CelebDF|DeepFaceLab|All)")
     parser.add_argument('--max_videos', type=int, default=-1, 
                         help="Maximum number of videos to use for training (default: all).")
     parser.add_argument('--config', default="configs/architecture.yaml", type=str, 
@@ -155,17 +155,17 @@ if __name__ == "__main__":
     model = CrossEfficientViT(config=config)
     model.train()   
 
-    dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/"]
+    dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/", "/CelebDF/", "/VoxCeleb/"]
     
     # all_fake_images_train = []
-    # all_fake_images_train += sorted(Path("DMDF_Faces_V6/train/fake").glob('**/*.png'))
+    # all_fake_images_train += sorted(Path("DMDF_Faces_V2/train/fake").glob('**/*.png'))
     # all_fake_images_train = list(set(all_fake_images_train))
     # all_fake_images_train = [str(path) for path in all_fake_images_train]
     # all_fake_images_train = sorted(all_fake_images_train)
     # shuffle(all_fake_images_train)
 
     # all_real_images_train = []
-    # all_real_images_train += sorted(Path("DMDF_Faces_V6/train/real").glob('**/*.png'))
+    # all_real_images_train += sorted(Path("DMDF_Faces_V2/train/real").glob('**/*.png'))
     # all_real_images_train = list(set(all_real_images_train))
     # all_real_images_train = [str(path) for path in all_real_images_train]
     # all_real_images_train = sorted(all_real_images_train)
@@ -180,7 +180,7 @@ if __name__ == "__main__":
     #all_real_images_train = all_real_images_train[0:int(len_real * 0.95)]
 
     # all_fake_images_val = []
-    # all_fake_images_val += sorted(Path("DMDF_Faces_V6/validation/fake").glob('**/*.png'))
+    # all_fake_images_val += sorted(Path("DMDF_Faces_V2/validation/fake").glob('**/*.png'))
     # all_fake_images_val = list(set(all_fake_images_val))
     # all_fake_images_val = [str(path) for path in all_fake_images_val]
     # all_fake_images_val = sorted(all_fake_images_val)
@@ -188,7 +188,7 @@ if __name__ == "__main__":
 
 
     # all_real_images_val = []
-    # all_real_images_val += sorted(Path("DMDF_Faces_V6/validation/real").glob('**/*.png'))
+    # all_real_images_val += sorted(Path("DMDF_Faces_V2/validation/real").glob('**/*.png'))
     # all_real_images_val = list(set(all_real_images_val))
     # all_real_images_val = [str(path) for path in all_real_images_val]
     # all_real_images_val = sorted(all_real_images_val)
@@ -206,66 +206,11 @@ if __name__ == "__main__":
 
 
     print("Model Parameters:", get_n_params(model))
-    # print("Total Train Real: " + str(len(all_real_images_train)))
-    # print("Total Train Fake: " + str(len(all_fake_images_train)))
-    # print("Total Val Real: " + str(len(all_real_images_val)))
-    # print("Total Val Fake: " + str(len(all_fake_images_val)))
-   
-    # #READ DATASET
-    # if opt.dataset != "All":
-    #     folders = ["Original", opt.dataset]
-    # else:
-    #     folders = ["Original", "DFDC", "Deepfakes", "Face2Face", "FaceShifter", "FaceSwap", "NeuralTextures"]
 
-    # sets = [TRAINING_DIR, VALIDATION_DIR]
-
-    # paths = []
-    # for dataset in sets:
-    #     for folder in folders:
-    #         subfolder = os.path.join(dataset, folder)
-    #         for index, video_folder_name in enumerate(os.listdir(subfolder)):
-    #             if index == opt.max_videos:
-    #                 break
-    #             if os.path.isdir(os.path.join(subfolder, video_folder_name)):
-    #                 paths.append(os.path.join(subfolder, video_folder_name))
-                
-
-    # mgr = Manager()
-    # train_dataset = mgr.list()
-    # validation_dataset = mgr.list()
-
-    # with Pool(processes=10) as p:
-    #     with tqdm(total=len(paths)) as pbar:
-    #         for v in p.imap_unordered(partial(read_frames, train_dataset=train_dataset, validation_dataset=validation_dataset),paths):
-    #             pbar.update()
-    # train_samples = len(train_dataset)
-    # train_dataset = shuffle_dataset(train_dataset)
-    # validation_samples = len(validation_dataset)
-    # validation_dataset = shuffle_dataset(validation_dataset)
-
-    # Print some useful statistics
-    # print("Train images:", len(train_dataset), "Validation images:", len(validation_dataset))
-    # print("__TRAINING STATS__")
-    # train_counters = collections.Counter(image[1] for image in train_dataset)
-    # print(train_counters)
-    
-    # class_weights = train_counters[0] / train_counters[1]
-    # print("Weights", class_weights)
-
-    # print("__VALIDATION STATS__")
-    # val_counters = collections.Counter(image[1] for image in validation_dataset)
-    # print(val_counters)
-    # print("___________________")
 
     # loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([class_weights]))
     loss_fn = torch.nn.BCEWithLogitsLoss()
 
-    # # Create the data loaders
-    # validation_labels = np.asarray([row[1] for row in validation_dataset])
-    # labels = np.asarray([row[1] for row in train_dataset])
-
-    # train_dataset = DeepFakesDataset(np.asarray([row[0] for row in train_dataset]), labels, config['model']['image-size'])
-    # train_dataset = DeepFakesDataset(all_real_images_train, all_fake_images_train, config['model']['image-size'])
     train_dataset = DeepFakesDataset(dataset_path_labels, config['model']['image-size'])
     
     dl = torch.utils.data.DataLoader(train_dataset, batch_size=config['training']['bs'], shuffle=True, sampler=None,
