@@ -78,7 +78,7 @@ def check_correct(preds, labels):
             negative_class += 1
     return correct, positive_class, negative_class
 
-def check_correct_with_paths(preds, labels, path_names, dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/"]):
+def check_correct_with_paths(preds, labels, path_names, dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/", "/CelebDF/", "/VoxCeleb/"]):
     preds = preds.cpu()
     labels = labels.cpu()
     preds = [np.asarray(torch.sigmoid(pred).detach().numpy()).round() for pred in preds]
