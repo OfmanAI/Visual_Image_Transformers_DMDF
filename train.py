@@ -18,11 +18,11 @@ import uuid
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from sklearn.metrics import accuracy_score
 import cv2
-from transforms.albu import IsotropicResize
+from transforms_cevit.albu import IsotropicResize
 import glob
 import pandas as pd
 from tqdm import tqdm
-from utils import get_method, check_correct, resize, shuffle_dataset, get_n_params, check_correct_with_paths
+from utils import get_method, check_correct, resize, shuffle_dataset, get_n_params, check_correct_with_paths, get_dataset_from_imagepath, get_demographic_info_from_imagepath
 from sklearn.utils.class_weight import compute_class_weight 
 from torch.optim import lr_scheduler
 import collections
@@ -32,104 +32,14 @@ import yaml
 import argparse
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
-
-
-
-# BASE_DIR = '../../deep_fakes/'
-# DATA_DIR = os.path.join(BASE_DIR, "dataset")
-# TRAINING_DIR = os.path.join(DATA_DIR, "training_set")
-# VALIDATION_DIR = os.path.join(DATA_DIR, "validation_set")
-# TEST_DIR = os.path.join(DATA_DIR, "test_set")
-# MODELS_PATH = "models"
-# METADATA_PATH = os.path.join(BASE_DIR, "data/metadata") # Folder containing all training metadata for DFDC dataset
-# VALIDATION_LABELS_PATH = os.path.join(DATA_DIR, "dfdc_val_labels.csv")
-
-
-# def read_frames(video_path, train_dataset, validation_dataset):
-    
-#     # Get the video label based on dataset selected
-#     method = get_method(video_path, DATA_DIR)
-#     if TRAINING_DIR in video_path:
-#         if "Original" in video_path:
-#             label = 0.
-#         elif "DFDC" in video_path:
-#             for json_path in glob.glob(os.path.join(METADATA_PATH, "*.json")):
-#                 with open(json_path, "r") as f:
-#                     metadata = json.load(f)
-#                 video_folder_name = os.path.basename(video_path)
-#                 video_key = video_folder_name + ".mp4"
-#                 if video_key in metadata.keys():
-#                     item = metadata[video_key]
-#                     label = item.get("label", None)
-#                     if label == "FAKE":
-#                         label = 1.         
-#                     else:
-#                         label = 0.
-#                     break
-#                 else:
-#                     label = None
-#         else:
-#             label = 1.
-#         if label == None:
-#             print("NOT FOUND", video_path)
-#     else:
-#         if "Original" in video_path:
-#             label = 0.
-#         elif "DFDC" in video_path:
-#             val_df = pd.DataFrame(pd.read_csv(VALIDATION_LABELS_PATH))
-#             video_folder_name = os.path.basename(video_path)
-#             video_key = video_folder_name + ".mp4"
-#             label = val_df.loc[val_df['filename'] == video_key]['label'].values[0]
-#         else:
-#             label = 1.
-
-#     # Calculate the interval to extract the frames
-#     frames_number = len(os.listdir(video_path))
-#     if label == 0:
-#         min_video_frames = max(int(config['training']['frames-per-video'] * config['training']['rebalancing-real']),1) # Compensate unbalancing
-#     else:
-#         min_video_frames = max(int(config['training']['frames-per-video'] * config['training']['rebalancing-fake']),1)
-
-    
-    
-#     if VALIDATION_DIR in video_path:
-#         min_video_frames = int(max(min_video_frames/8, 2))
-#     frames_interval = int(frames_number / min_video_frames)
-#     frames_paths = os.listdir(video_path)
-#     frames_paths_dict = {}
-
-#     # Group the faces with the same index, reduce probabiity to skip some faces in the same video
-#     for path in frames_paths:
-#         for i in range(0,1):
-#             if "_" + str(i) in path:
-#                 if i not in frames_paths_dict.keys():
-#                     frames_paths_dict[i] = [path]
-#                 else:
-#                     frames_paths_dict[i].append(path)
-#     # Select only the frames at a certain interval
-#     if frames_interval > 0:
-#         for key in frames_paths_dict.keys():
-#             if len(frames_paths_dict) > frames_interval:
-#                 frames_paths_dict[key] = frames_paths_dict[key][::frames_interval]
-            
-#             frames_paths_dict[key] = frames_paths_dict[key][:min_video_frames]
-#     # Select N frames from the collected ones
-#     for key in frames_paths_dict.keys():
-#         for index, frame_image in enumerate(frames_paths_dict[key]):
-#             #image = transform(np.asarray(cv2.imread(os.path.join(video_path, frame_image))))
-#             image = cv2.imread(os.path.join(video_path, frame_image))
-#             if image is not None:
-#                 if TRAINING_DIR in video_path:
-#                     train_dataset.append((image, label))
-#                 else:
-#                     validation_dataset.append((image, label))
+import textwrap 
 
 # Main body
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--num_epochs', default=300, type=int,
                         help='Number of training epochs.')
-    parser.add_argument('--workers', default=10, type=int,
+    parser.add_argument('--workers', default=16, type=int,
                         help='Number of data loader workers.')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='Path to latest checkpoint (default: none).')
@@ -145,54 +55,20 @@ if __name__ == "__main__":
                         help="How many epochs wait before stopping for validation loss not improving.")
     
     opt = parser.parse_args()
+    experiment_name = "E-Vit-Exp9"
     print(opt)
 
-    writer = SummaryWriter("logs2/CE-Vit-Exp2")
+    writer = SummaryWriter("logs2/" + experiment_name)
+    MODELS_PATH = "Checkpoints/" + experiment_name + "/"
 
     with open(opt.config, 'r') as ymlfile:
         config = yaml.safe_load(ymlfile)
  
     model = CrossEfficientViT(config=config)
     model.train()   
-
-    dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/", "/CelebDF/", "/VoxCeleb/"]
     
-    # all_fake_images_train = []
-    # all_fake_images_train += sorted(Path("DMDF_Faces_V2/train/fake").glob('**/*.png'))
-    # all_fake_images_train = list(set(all_fake_images_train))
-    # all_fake_images_train = [str(path) for path in all_fake_images_train]
-    # all_fake_images_train = sorted(all_fake_images_train)
-    # shuffle(all_fake_images_train)
-
-    # all_real_images_train = []
-    # all_real_images_train += sorted(Path("DMDF_Faces_V2/train/real").glob('**/*.png'))
-    # all_real_images_train = list(set(all_real_images_train))
-    # all_real_images_train = [str(path) for path in all_real_images_train]
-    # all_real_images_train = sorted(all_real_images_train)
-    # shuffle(all_real_images_train)
-
-    #len_fake = len(all_fake_images_train)
-    #all_fake_images_val = all_fake_images_train[int(len_fake * 0.95):]
-    #all_fake_images_train = all_fake_images_train[0:int(len_fake * 0.95)]
-
-    #len_real = len(all_real_images_train)
-    #all_real_images_val = all_real_images_train[int(len_real * 0.95):]
-    #all_real_images_train = all_real_images_train[0:int(len_real * 0.95)]
-
-    # all_fake_images_val = []
-    # all_fake_images_val += sorted(Path("DMDF_Faces_V2/validation/fake").glob('**/*.png'))
-    # all_fake_images_val = list(set(all_fake_images_val))
-    # all_fake_images_val = [str(path) for path in all_fake_images_val]
-    # all_fake_images_val = sorted(all_fake_images_val)
-    # shuffle(all_fake_images_val)
-
-
-    # all_real_images_val = []
-    # all_real_images_val += sorted(Path("DMDF_Faces_V2/validation/real").glob('**/*.png'))
-    # all_real_images_val = list(set(all_real_images_val))
-    # all_real_images_val = [str(path) for path in all_real_images_val]
-    # all_real_images_val = sorted(all_real_images_val)
-    # shuffle(all_real_images_val)
+    dataset_path_labels_fake = ["/CelebDF/", "/deeper_forensics/", "/deepfacelab/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/"]
+    dataset_path_labels_real = ["/CelebDF/", "/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/VoxCeleb/"]
     
     
     optimizer = torch.optim.SGD(model.parameters(), lr=config['training']['lr'], weight_decay=config['training']['weight-decay'])
@@ -204,41 +80,42 @@ if __name__ == "__main__":
     else:
         print("No checkpoint loaded.")
 
-
     print("Model Parameters:", get_n_params(model))
-
 
     # loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([class_weights]))
     loss_fn = torch.nn.BCEWithLogitsLoss()
 
-    train_dataset = DeepFakesDataset(dataset_path_labels, config['model']['image-size'])
+    train_dataset = DeepFakesDataset(dataset_path_labels_fake, dataset_path_labels_real, config['model']['image-size'])
     
     dl = torch.utils.data.DataLoader(train_dataset, batch_size=config['training']['bs'], shuffle=True, sampler=None,
                                  batch_sampler=None, num_workers=opt.workers, collate_fn=None,
-                                 pin_memory=False, drop_last=False, timeout=0,
+                                 pin_memory=False, drop_last=True, timeout=0,
                                  worker_init_fn=None, prefetch_factor=2,
                                  persistent_workers=False)
     del train_dataset
 
-    # validation_dataset = DeepFakesDataset(np.asarray([row[0] for row in validation_dataset]), validation_labels, config['model']['image-size'], mode='validation')
-    # validation_dataset = DeepFakesDataset(all_real_images_val, all_fake_images_val, config['model']['image-size'])
-    validation_dataset = DeepFakesDataset(dataset_path_labels, config['model']['image-size'], mode='validation')
+    validation_dataset = DeepFakesDataset(dataset_path_labels_fake, dataset_path_labels_real, config['model']['image-size'], mode='validation', max_images=100000)
     val_dl = torch.utils.data.DataLoader(validation_dataset, batch_size=config['training']['bs'], shuffle=True, sampler=None,
                                     batch_sampler=None, num_workers=opt.workers, collate_fn=None,
-                                    pin_memory=False, drop_last=False, timeout=0,
+                                    pin_memory=False, drop_last=True, timeout=0,
                                     worker_init_fn=None, prefetch_factor=2,
                                     persistent_workers=False)
     del validation_dataset
     
 
     model = model.cuda()
+
+    # Create training variables
     counter = 0
     global_step = 0;
     not_improved_loss = 0
     previous_loss = math.inf
-    log_tb_val_steps = 100
+    log_tb_training_steps = 100
     evaluation_steps = 1000
     save_checkpoint_steps = 10000
+    num_log_images = 8
+
+    # Run training loop
     for t in range(starting_epoch, opt.num_epochs + 1):
         if not_improved_loss == opt.patience:
             break
@@ -252,7 +129,10 @@ if __name__ == "__main__":
         train_correct = 0
         positive = 0
         negative = 0
+
+        total_correct_by_dataset_train = {}
         
+        # Loop through entire training dataset
         for index, (images, labels, image_path_names) in enumerate(dl):
             model.train()  
             global_step += 1
@@ -264,39 +144,105 @@ if __name__ == "__main__":
             y_pred = y_pred.cpu()
             loss = loss_fn(y_pred, labels)
         
+            # Check positive and negative accuracy per dataset type
             corrects, positive_class, negative_class = check_correct(y_pred, labels)  
             correct_by_dataset = check_correct_with_paths(y_pred, labels, image_path_names) 
+
+            # Combine results in each batch, will be averaged during logging
+            if not total_correct_by_dataset_train:
+                total_correct_by_dataset_train = correct_by_dataset
+            else:
+                for key, val in correct_by_dataset.items():
+                    if(key not in total_correct_by_dataset_train):
+                        total_correct_by_dataset_train[key] = {}
+                    for key2, val2 in val.items():
+                        if(key2 not in total_correct_by_dataset_train[key]):
+                            total_correct_by_dataset_train[key][key2] = 0
+                        total_correct_by_dataset_train[key][key2] += val2
+
             train_correct += corrects
             positive += positive_class
             negative += negative_class
-            optimizer.zero_grad()
-            
-            loss.backward()
 
+            optimizer.zero_grad()
+            loss.backward()
             optimizer.step()
             scheduler.step()
+
             counter += 1
+            learning_rate = optimizer.param_groups[0]['lr']
+
+            # Create an easy to read variable for logging
             total_loss += round(loss.item(), 2)
 
-            if(global_step % log_tb_val_steps):
-                writer.add_scalar('Train/CE-VIT Loss: ', loss.item(), global_step)
-                for correct_by_dataset_key, correct_by_dataset_value in correct_by_dataset.items():
-                    TB_var_name_pos = "Train/CE-ViT Accuracy Positive - " + correct_by_dataset_key
-                    TB_var_name_neg = "Train/CE-ViT Accuracy Negative - " + correct_by_dataset_key
+            # Log training losses
+            if(global_step % log_tb_training_steps == 0):
+                writer.add_scalar('Train/Loss: ', loss.item(), global_step)
+                for correct_by_dataset_key, correct_by_dataset_value in total_correct_by_dataset_train.items():
+                    TB_var_name_pos = "Train/Accuracy Positive - " + correct_by_dataset_key
+                    TB_var_name_neg = "Train/Accuracy Negative - " + correct_by_dataset_key
                     if((correct_by_dataset_value["total_positive"] > 0)):
                         positive_accuracy = correct_by_dataset_value["correct_positive"]/(correct_by_dataset_value["total_positive"])
                         writer.add_scalar(TB_var_name_pos, positive_accuracy, global_step)
                     if((correct_by_dataset_value["total_negative"] > 0)):
                         negative_accuracy = correct_by_dataset_value["correct_negative"]/(correct_by_dataset_value["total_negative"])
                         writer.add_scalar(TB_var_name_neg, negative_accuracy, global_step)
+                
+                writer.add_scalar('Train/LR', learning_rate, global_step)
+                writer.add_scalar('Train/Accuracy', corrects/config['training']['bs'], global_step)
 
+                # Log images to investigate augmentations, labels, datasets, demographics, etc
+                for image_index in range(0, num_log_images):
+
+                    log_image = (images[image_index].detach().cpu().numpy() * 255.).astype(np.uint8)
+                    log_image = np.uint8(np.clip(log_image, 0, 255))
+                    log_image = np.transpose(log_image, (1, 2, 0))
+                    log_image = cv2.cvtColor(log_image, cv2.COLOR_RGB2BGR)
+                    log_image = cv2.resize(log_image, (0,0), fx=2.0, fy=2.0) 
+                    log_image = cv2.copyMakeBorder(log_image, 256, 0, 0, 0, cv2.BORDER_CONSTANT)
+
+                    log_path = image_path_names[image_index]
+                    log_path_wrapped_list = textwrap.wrap(log_path, width=40)
+                    
+                    log_path_dataset_type = get_dataset_from_imagepath(log_path)
+                    log_label = labels[image_index].detach().cpu().numpy()[0]
+                    log_prediction = torch.sigmoid(y_pred[image_index]).detach().cpu().numpy()[0]
+
+                    log_label_prediction = "LABEL: " + str(log_label) + "   |   " + str(log_prediction)
+
+                    final_age, final_gender, final_race, final_emotion = get_demographic_info_from_imagepath(log_path)
+
+                    for log_path_index, log_path_line in enumerate(log_path_wrapped_list):
+                        cv2.putText(log_image, log_path_line, (4,16 * log_path_index + 16), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                    
+                    cv2.putText(log_image, log_path_dataset_type, (4, 16 * 6), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                    cv2.putText(log_image, log_label_prediction, (4, 16 * 7), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+
+                    if(final_age is not None):
+                        cv2.putText(log_image, "PREDICTED AGE:           " + str(final_age), (4, 16 * 8), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                        cv2.putText(log_image, "PREDICTED GENDER:        " + final_gender, (4, 16 * 9), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                        cv2.putText(log_image, "PREDICTED RACE:          " + final_race, (4, 16 * 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                        cv2.putText(log_image, "PREDICTED AVG EMOTION:  " + final_emotion, (4, 16 * 11), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+
+
+                    writer.add_images(f"Train/Image_{image_index}", log_image, global_step, dataformats="HWC")
+
+
+                # Reset logging dictionary so we can refill from scratch
+                total_correct_by_dataset_train = {}
+
+                # Log images along with dataset, image path, label, prediction, and demographic information
+
+
+            # Update Console Bar
             for i in range(config['training']['bs']):
                 bar.next()
 
-             
-            if index%1200 == 0:
+            # Print values to console
+            if index%100 == 0:
                 print("\nLoss: ", total_loss/counter, "Accuracy: ",train_correct/(counter*config['training']['bs']) ,"Train 0s: ", negative, "Train 1s:", positive)  
 
+            # Run and log evaluation
             if global_step % evaluation_steps == 0:
                 print("Evaluating data")
                 val_counter = 0
@@ -304,7 +250,7 @@ if __name__ == "__main__":
                 val_positive = 0
                 val_negative = 0
                 model.eval()
-                total_correct_by_dataset = {}
+                total_correct_by_dataset_eval = {}
                 for index, (val_images, val_labels, val_image_path_names) in enumerate(val_dl):
             
                     val_images = np.transpose(val_images, (0, 3, 1, 2))
@@ -318,12 +264,12 @@ if __name__ == "__main__":
                     val_corrects, val_positive_class, val_negative_class = check_correct(val_pred, val_labels)
 
                     correct_by_dataset = check_correct_with_paths(y_pred, labels, image_path_names)  
-                    if not total_correct_by_dataset:
-                        total_correct_by_dataset = correct_by_dataset
+                    if not total_correct_by_dataset_eval:
+                        total_correct_by_dataset_eval = correct_by_dataset
                     else:
                         for key, val in correct_by_dataset.items():
                             for key2, val2 in val.items():
-                                total_correct_by_dataset[key][key2] += val2
+                                total_correct_by_dataset_eval[key][key2] += val2
 
                     val_correct += val_corrects
                     val_positive += val_positive_class
@@ -344,24 +290,60 @@ if __name__ == "__main__":
                 
                 previous_loss = total_val_loss
 
-                writer.add_scalar('Eval/CE-VIT avg Loss: ', total_val_loss, global_step)
-                for correct_by_dataset_key, correct_by_dataset_value in total_correct_by_dataset.items():
-                    TB_var_name_pos = "Eval/CE-ViT Accuracy Positive - " + correct_by_dataset_key
-                    TB_var_name_neg = "Eval/CE-ViT Accuracy Negative - " + correct_by_dataset_key
+                writer.add_scalar('Eval/Loss: ', total_val_loss, global_step)
+                for correct_by_dataset_key, correct_by_dataset_value in total_correct_by_dataset_eval.items():
+                    TB_var_name_pos = "Eval/Accuracy Positive - " + correct_by_dataset_key
+                    TB_var_name_neg = "Eval/Accuracy Negative - " + correct_by_dataset_key
                     if((correct_by_dataset_value["total_positive"] > 0)):
                         positive_accuracy = correct_by_dataset_value["correct_positive"]/(correct_by_dataset_value["total_positive"])
                         writer.add_scalar(TB_var_name_pos, positive_accuracy, global_step)
                     if((correct_by_dataset_value["total_negative"] > 0)):
                         negative_accuracy = correct_by_dataset_value["correct_negative"]/(correct_by_dataset_value["total_negative"])
                         writer.add_scalar(TB_var_name_neg, negative_accuracy, global_step)
+                
+                writer.add_scalar('Eval/LR', learning_rate, global_step)
+                writer.add_scalar('Eval/Accuracy', val_correct/config['training']['bs'], global_step)
 
-                #print("#" + str(t) + "/" + str(global_step) + " loss:" +
-                    #str(total_loss) + " accuracy:" + str(train_correct) +" val_loss:" + str(total_val_loss) + " val_accuracy:" + str(val_correct) + " val_0s:" + str(val_negative) + "/" + str(np.count_nonzero(validation_labels == 0)) + " val_1s:" + str(val_positive) + "/" + str(np.count_nonzero(validation_labels == 1)))
-    
+                # Log images to investigate augmentations, labels, datasets, demographics, etc
+                for image_index in range(0, num_log_images):
+
+                    log_image = (val_images[image_index].detach().cpu().numpy() * 255.).astype(np.uint8)
+                    log_image = np.uint8(np.clip(log_image, 0, 255))
+                    log_image = np.transpose(log_image, (1, 2, 0))
+                    log_image = cv2.cvtColor(log_image, cv2.COLOR_RGB2BGR)
+                    log_image = cv2.resize(log_image, (0,0), fx=2.0, fy=2.0) 
+                    log_image = cv2.copyMakeBorder(log_image, 256, 0, 0, 0, cv2.BORDER_CONSTANT)
+
+                    log_path = val_image_path_names[image_index]
+                    log_path_wrapped_list = textwrap.wrap(log_path, width=40)
+                    
+                    log_path_dataset_type = get_dataset_from_imagepath(log_path)
+                    log_label = val_labels[image_index].detach().cpu().numpy()[0]
+                    log_prediction = torch.sigmoid(val_pred[image_index]).detach().cpu().numpy()[0]
+
+                    log_label_prediction = "LABEL: " + str(log_label) + "   |   " + str(log_prediction)
+
+                    final_age, final_gender, final_race, final_emotion = get_demographic_info_from_imagepath(log_path)
+
+                    for log_path_index, log_path_line in enumerate(log_path_wrapped_list):
+                        cv2.putText(log_image, log_path_line, (4,16 * log_path_index + 16), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                    
+                    cv2.putText(log_image, log_path_dataset_type, (4, 16 * 6), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                    cv2.putText(log_image, log_label_prediction, (4, 16 * 7), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+
+                    if(final_age is not None):
+                        cv2.putText(log_image, "PREDICTED AGE:           " + str(final_age), (4, 16 * 8), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                        cv2.putText(log_image, "PREDICTED GENDER:        " + final_gender, (4, 16 * 9), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                        cv2.putText(log_image, "PREDICTED RACE:          " + final_race, (4, 16 * 10), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+                        cv2.putText(log_image, "PREDICTED AVG EMOTION:  " + final_emotion, (4, 16 * 11), cv2.FONT_HERSHEY_PLAIN, 1, (255, 255, 255), 1)
+
+
+                    writer.add_images(f"Eval/Image_{image_index}", log_image, global_step, dataformats="HWC")
+
         
-        if(global_step % save_checkpoint_steps):
-            if not os.path.exists(MODELS_PATH):
-                os.makedirs(MODELS_PATH)
-            torch.save(model.state_dict(), os.path.join(MODELS_PATH,  "efficientnet_checkpoint" + str(t) + "_" + opt.dataset))
-            
-            
+            # Save checkpoint
+            if(global_step % save_checkpoint_steps == 0):
+                if not os.path.exists(MODELS_PATH):
+                    os.makedirs(MODELS_PATH)
+                torch.save(model.state_dict(), os.path.join(MODELS_PATH,  experiment_name + "_efficientnet_step" + str(global_step) + "_" + opt.dataset))
+                

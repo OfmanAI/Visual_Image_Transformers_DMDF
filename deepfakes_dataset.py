@@ -4,115 +4,123 @@ import cv2
 import numpy as np
 import random
 import uuid
-from albumentations import Compose, RandomBrightnessContrast, \
-    HorizontalFlip, FancyPCA, HueSaturationValue, OneOf, ToGray, \
-    ShiftScaleRotate, ImageCompression, PadIfNeeded, GaussNoise, GaussianBlur, Rotate
+import albumentations as A
 
-from transforms.albu import IsotropicResize
+from transforms_cevit.albu import IsotropicResize
 from pathlib import Path
 
+
+MAXIMUM_VALIDATION_SIZE = 10000
 class DeepFakesDataset(Dataset):
     # def __init__(self, images, labels, image_size, mode = 'train'):
     
-    def __init__(self, dataset_path_labels, image_size, mode = 'train'):
-        # self.x = images
-        # self.y = torch.from_numpy(labels)
-        fake_paths, real_paths = self.get_all_images(dataset_path_labels, mode, should_normalize_presence=False)
-        print("Loaded Image Paths: " + mode)
-        print("Fake: " + str(len(fake_paths)))
-        print("Real: " + str(len(real_paths)))
-        self.fake_paths = fake_paths
-        self.real_paths = real_paths
+    def __init__(self, dataset_path_labels_fake, dataset_path_labels_real, image_size, mode = 'train', max_images=0):
+        self.dataset_root_name = 'dmdf_v2/'
+        self.crop_type = "bounding-box-tight-v2-original-fps/"
+
+        # Get a dictionary of image paths split by each dataset type
+        fake_paths_dictionary, real_paths_dictionary = self.get_all_images(dataset_path_labels_fake, dataset_path_labels_real, mode)
+        self.fake_paths_dictionary = fake_paths_dictionary
+        self.real_paths_dictionary = real_paths_dictionary
         self.image_size = image_size
         self.mode = mode
-        self.n_samples = len(self.fake_paths) + len(self.real_paths)
+
+        # Calculate total amount of real and fake images across all datasets
+        total_fakes = 0
+        total_reals = 0
+        for fake_dataset_key, fake_dataset_value in fake_paths_dictionary.items():
+            total_fakes += len(fake_dataset_value)
+
+        for real_dataset_key, real_dataset_value in real_paths_dictionary.items():
+            total_reals += len(real_dataset_value)
+
+        print("Loaded Image Paths: " + mode)
+        print("Fake: " + str(total_fakes))
+        print("Real: " + str(total_reals))
+
+        # Reduce validation size to maximum value
+        if(max_images == 0):
+            self.n_samples = total_fakes + total_reals
+        else:
+            self.n_samples = min(MAXIMUM_VALIDATION_SIZE, (total_fakes + total_reals))
+
+        print("Number Samples: " + str(self.n_samples))
         
 
-    def get_all_images(self, dataset_path_labels, split, should_normalize_presence=False):
-        reals_dataset_list = []
-        fakes_dataset_list = []
-        max_in_dataset = 100000
-        
+    def get_all_images(self, dataset_path_labels_fake, dataset_path_labels_real, split):
+
+        reals_dataset_dictionary = {}
+        fakes_dataset_dictionary = {}
 
         # Get all images for each dataset type as separate lists for real and fake
         # Create a list of lists for real and fake
-        for dataset_path_label in dataset_path_labels:
+        for dataset_path_label in dataset_path_labels_fake:
 
             all_fake_images_train = []
-            all_fake_images_train += sorted(Path("DMDF_Faces_V6/" + split + "/fake" + dataset_path_label).glob('**/*.png'))
+            all_fake_images_train += sorted(Path(self.dataset_root_name + split + "/fake" + dataset_path_label + self.crop_type).glob('**/*.png'))
             all_fake_images_train = list(set(all_fake_images_train))
             all_fake_images_train = [str(path) for path in all_fake_images_train]
             all_fake_images_train = sorted(all_fake_images_train)
-            fakes_dataset_list.append(all_fake_images_train)
+            
+            print("Dataset Fakes")
+            print(dataset_path_label)
+            print("FAKES: " + str(len(all_fake_images_train)))
+            fakes_dataset_dictionary[dataset_path_label] = all_fake_images_train
+
+        for dataset_path_label in dataset_path_labels_real:
 
             all_real_images_train = []
-            all_real_images_train += sorted(Path("DMDF_Faces_V6/" + split + "/real" + dataset_path_label).glob('**/*.png'))
+            all_real_images_train += sorted(Path(self.dataset_root_name + split + "/real" + dataset_path_label + self.crop_type).glob('**/*.png'))
             all_real_images_train = list(set(all_real_images_train))
             all_real_images_train = [str(path) for path in all_real_images_train]
             all_real_images_train = sorted(all_real_images_train)
-            reals_dataset_list.append(all_real_images_train)
+            
+            print("Dataset Reals")
             print(dataset_path_label)
+            print("REALS: " + str(len(all_real_images_train)))
+            reals_dataset_dictionary[dataset_path_label] = all_real_images_train
 
-        # Loop through each dataset real and fake to find the maximum across all datasets
-        max_length_real = 0
-        for reals_dataset in reals_dataset_list:
-            if(len(reals_dataset) > max_length_real):
-                max_length_real = len(reals_dataset)
+        return fakes_dataset_dictionary, reals_dataset_dictionary
 
-        max_length_fake = 0
-        for fakes_dataset in fakes_dataset_list:
-            if(len(fakes_dataset) > max_length_fake):
-                max_length_fake = len(fakes_dataset)
-
-        # Loop through each real and fake dataset, upsample images so each dataset has the same number of images, normalized dataset type presence during training
-        final_real_images_set = []
-        max_length_real = min(max_length_real, max_in_dataset)
-        for reals_dataset in reals_dataset_list:
-            if(len(reals_dataset) == 0):
-                continue
-            if(should_normalize_presence == False):
-                this_upsampled_reals_dataset = reals_dataset
-            else:
-                this_upsampled_reals_dataset = np.random.choice(reals_dataset, max_length_real)
-            final_real_images_set.extend(this_upsampled_reals_dataset)
-
-        final_fake_images_set = []
-        max_length_fake = min(max_length_fake, max_in_dataset)
-        for fakes_dataset in fakes_dataset_list: 
-            if(len(fakes_dataset) == 0):
-                continue
-            if(should_normalize_presence == False):
-                this_upsampled_fakes_dataset = fakes_dataset
-            else:
-                this_upsampled_fakes_dataset = np.random.choice(fakes_dataset, max_length_fake)
-            final_fake_images_set.extend(this_upsampled_fakes_dataset)
-
-        return final_fake_images_set, final_real_images_set
 
     
+    # Augmentations
     def create_train_transforms(self, size):
-        return Compose([
-            ImageCompression(quality_lower=60, quality_upper=100, p=0.2),
-            GaussNoise(p=0.3),
-            #GaussianBlur(blur_limit=3, p=0.05),
-            HorizontalFlip(),
-            OneOf([
-                IsotropicResize(max_side=size, interpolation_down=cv2.INTER_AREA, interpolation_up=cv2.INTER_CUBIC),
-                IsotropicResize(max_side=size, interpolation_down=cv2.INTER_AREA, interpolation_up=cv2.INTER_LINEAR),
-                IsotropicResize(max_side=size, interpolation_down=cv2.INTER_LINEAR, interpolation_up=cv2.INTER_LINEAR),
-            ], p=1),
-            PadIfNeeded(min_height=size, min_width=size, border_mode=cv2.BORDER_CONSTANT),
-            OneOf([RandomBrightnessContrast(), FancyPCA(), HueSaturationValue()], p=0.4),
-            ToGray(p=0.2),
-            ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=5, border_mode=cv2.BORDER_CONSTANT, p=0.5),
+        return A.Compose([
+            A.Affine(p=0.10, scale=(0.95, 1.05), translate_percent=(-0.03, 0.03), rotate=(-3, 3), shear=(-3, 3), mode=cv2.BORDER_REPLICATE),
+            A.CLAHE(always_apply=False, p=0.10, clip_limit=(1, 4), tile_grid_size=(8, 8)),
+            A.CoarseDropout(always_apply=False, p=0.10, max_holes=8, max_height=8, max_width=8, min_holes=2, min_height=2, min_width=2),
+            A.ChannelShuffle(always_apply=False, p=0.05),
+            A.GaussNoise(always_apply=False, p=0.10, var_limit=(10.0, 50.0)),
+            A.HueSaturationValue(always_apply=False, p=0.3, hue_shift_limit=(-20, 20), sat_shift_limit=(-30, 30), val_shift_limit=(-20, 20)),
+            A.ImageCompression(always_apply=False, p=0.05, quality_lower=60, quality_upper=100, compression_type=0),
+            A.MotionBlur(always_apply=False, p=0.05, blur_limit=(3, 7)),
+            A.RandomBrightnessContrast(always_apply=False, p=0.3, brightness_limit=(-0.2, 0.2), contrast_limit=(-0.2, 0.2), brightness_by_max=True),
+            A.HorizontalFlip(p=0.5),
+            A.ToGray(p=0.05),
+            A.ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=5, border_mode=cv2.BORDER_CONSTANT, p=0.5)
+
+            # ImageCompression(quality_lower=60, quality_upper=100, p=0.2),
+            # GaussNoise(p=0.3),
+            # GaussianBlur(blur_limit=3, p=0.05),
+            # HorizontalFlip(),
+            # PadIfNeeded(min_height=size, min_width=size, border_mode=cv2.BORDER_CONSTANT),
+            # OneOf([RandomBrightnessContrast(), FancyPCA(), HueSaturationValue()], p=0.4),
+            # ToGray(p=0.2),
+            # ShiftScaleRotate(shift_limit=0.1, scale_limit=0.2, rotate_limit=5, border_mode=cv2.BORDER_CONSTANT, p=0.5),
         ]
         )
+
+    # No Augmentations
+    # def create_train_transforms(self, size):
+    #     return Compose([
+    #         Resize(height=size, width=size, interpolation=cv2.INTER_CUBIC, p=1.0),
+    #     ])
         
-    def create_val_transform(self, size):
-        return Compose([
-            IsotropicResize(max_side=size, interpolation_down=cv2.INTER_AREA, interpolation_up=cv2.INTER_CUBIC),
-            PadIfNeeded(min_height=size, min_width=size, border_mode=cv2.BORDER_CONSTANT),
-        ])
+    # def create_val_transform(self, size):
+    #     return Compose([
+    #         Resize(height=size, width=size, interpolation=cv2.INTER_CUBIC, p=1.0),
+    #     ])
 
     def __getitem__(self, index):
 
@@ -120,28 +128,34 @@ class DeepFakesDataset(Dataset):
         is_fake_image = random.choice([True, False])
 
         if(is_fake_image):
-            this_image_path = random.choice(self.fake_paths)
+            dataset_type = random.choice(list(self.fake_paths_dictionary.values()))
+            while len(dataset_type) == 0:
+                dataset_type = random.choice(list(self.fake_paths_dictionary.values()))
+            this_image_path = random.choice(dataset_type)
             label = 1.
         else:
-            this_image_path = random.choice(self.real_paths)
+            dataset_type = random.choice(list(self.real_paths_dictionary.values()))
+            while len(dataset_type) == 0:
+                dataset_type = random.choice(list(self.real_paths_dictionary.values()))
+            this_image_path = random.choice(dataset_type)
             label = 0.
 
         image = cv2.imread(str(this_image_path))
+        image = cv2.resize(image, (self.image_size, self.image_size), interpolation = cv2.INTER_CUBIC)
 
-        
-        # image = np.asarray(self.x[index])
-
-
-        
         if self.mode == 'train':
             transform = self.create_train_transforms(self.image_size)
-        else:
-            transform = self.create_val_transform(self.image_size)
-                
+            image = transform(image=image)['image']
+        # else:
+        #     transform = self.create_val_transform(self.image_size)
+
+
         #unique = uuid.uuid4()
         #cv2.imwrite("../dataset/augmented_frames/vit_augmentation/square_fda/"+str(unique)+"_"+str(index)+"_original.png", image)
    
-        image = transform(image=image)['image']
+        # image = transform(image=image)['image']
+
+        image = image/255.0
         
         #cv2.imwrite("../dataset/augmented_frames/vit_augmentation/square_fda/"+str(unique)+"_"+str(index)+".png", image)
         
