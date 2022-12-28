@@ -70,6 +70,8 @@ def check_correct(preds, labels):
 	preds = [np.asarray(torch.sigmoid(pred).detach().numpy()).round() for pred in preds]
 
 	correct = 0
+	correct_positive = 0
+	correct_negative = 0
 	positive_class = 0
 	negative_class = 0
 	for i in range(len(labels)):
@@ -78,11 +80,15 @@ def check_correct(preds, labels):
 			correct += 1
 		if labels[i] == 1:
 			positive_class += 1
+			if labels[i] == pred:
+				correct_positive += 1
 		else:
 			negative_class += 1
-	return correct, positive_class, negative_class
+			if labels[i] == pred:
+				correct_negative += 1
+	return correct, correct_positive, correct_negative, positive_class, negative_class
 
-def check_correct_with_paths(preds, labels, path_names, dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/", "/CelebDF/", "/VoxCeleb/"]):
+def check_correct_with_paths(preds, labels, path_names, dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/", "/CelebDF/", "/VoxCeleb/", "/FF_GoogleDF/"]):
 	preds = preds.cpu()
 	labels = labels.cpu()
 	preds = [np.asarray(torch.sigmoid(pred).detach().numpy()).round() for pred in preds]
@@ -215,7 +221,7 @@ def get_age_group_from_number(age):
 	else:
 		return "65+"
 
-def get_dataset_from_imagepath(imagepath, dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/", "/CelebDF/", "/VoxCeleb/"]):
+def get_dataset_from_imagepath(imagepath, dataset_path_labels=["/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/", "/deepfacelab/", "/CelebDF/", "/VoxCeleb/", "/FF_GoogleDF/"]):
 	proper_key = None
 	for dataset_path_label in dataset_path_labels:
 		if(dataset_path_label in imagepath):

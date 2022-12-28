@@ -51,14 +51,14 @@ if __name__ == "__main__":
                         help="Which configuration to use. See into 'config' folder.")
     parser.add_argument('--efficient_net', type=int, default=0, 
                         help="Which EfficientNet version to use (0 or 7, default: 0)")
-    parser.add_argument('--patience', type=int, default=5, 
+    parser.add_argument('--patience', type=int, default=20, 
                         help="How many epochs wait before stopping for validation loss not improving.")
     
     opt = parser.parse_args()
-    experiment_name = "E-Vit-Exp9"
+    experiment_name = "E-Vit-Exp16"
     print(opt)
 
-    writer = SummaryWriter("logs2/" + experiment_name)
+    writer = SummaryWriter("logs/" + experiment_name)
     MODELS_PATH = "Checkpoints/" + experiment_name + "/"
 
     with open(opt.config, 'r') as ymlfile:
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     model = CrossEfficientViT(config=config)
     model.train()   
     
-    dataset_path_labels_fake = ["/CelebDF/", "/deeper_forensics/", "/deepfacelab/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/NeuralTextures/"]
+    dataset_path_labels_fake = ["/CelebDF/", "/deeper_forensics/", "/deepfacelab/", "/DFDC/", "/Face_Forensics/", "/Face2Face/", "/FaceShifter/", "/FaceSwap/", "/FF_GoogleDF/", "/NeuralTextures/"]
     dataset_path_labels_real = ["/CelebDF/", "/deeper_forensics/", "/DFDC/", "/Face_Forensics/", "/VoxCeleb/"]
     
     
@@ -94,7 +94,7 @@ if __name__ == "__main__":
                                  persistent_workers=False)
     del train_dataset
 
-    validation_dataset = DeepFakesDataset(dataset_path_labels_fake, dataset_path_labels_real, config['model']['image-size'], mode='validation', max_images=100000)
+    validation_dataset = DeepFakesDataset(dataset_path_labels_fake, dataset_path_labels_real, config['model']['image-size'], mode='validation')
     val_dl = torch.utils.data.DataLoader(validation_dataset, batch_size=config['training']['bs'], shuffle=True, sampler=None,
                                     batch_sampler=None, num_workers=opt.workers, collate_fn=None,
                                     pin_memory=False, drop_last=True, timeout=0,
@@ -111,9 +111,9 @@ if __name__ == "__main__":
     not_improved_loss = 0
     previous_loss = math.inf
     log_tb_training_steps = 100
-    evaluation_steps = 1000
+    evaluation_steps = 10000
     save_checkpoint_steps = 10000
-    num_log_images = 8
+    num_log_images = 16
 
     # Run training loop
     for t in range(starting_epoch, opt.num_epochs + 1):
@@ -127,8 +127,11 @@ if __name__ == "__main__":
         
         bar = ChargingBar('EPOCH #' + str(t), max=(len(dl)*config['training']['bs'])+len(val_dl))
         train_correct = 0
-        positive = 0
-        negative = 0
+        train_total = 0
+        train_positive_total = 0
+        train_positive_correct = 0
+        train_negative_total = 0
+        train_negative_correct = 0
 
         total_correct_by_dataset_train = {}
         
@@ -145,24 +148,27 @@ if __name__ == "__main__":
             loss = loss_fn(y_pred, labels)
         
             # Check positive and negative accuracy per dataset type
-            corrects, positive_class, negative_class = check_correct(y_pred, labels)  
+            correct, correct_positive, correct_negative, positive_class, negative_class = check_correct(y_pred, labels)  
             correct_by_dataset = check_correct_with_paths(y_pred, labels, image_path_names) 
 
             # Combine results in each batch, will be averaged during logging
-            if not total_correct_by_dataset_train:
-                total_correct_by_dataset_train = correct_by_dataset
-            else:
-                for key, val in correct_by_dataset.items():
-                    if(key not in total_correct_by_dataset_train):
-                        total_correct_by_dataset_train[key] = {}
-                    for key2, val2 in val.items():
-                        if(key2 not in total_correct_by_dataset_train[key]):
-                            total_correct_by_dataset_train[key][key2] = 0
-                        total_correct_by_dataset_train[key][key2] += val2
+            # if not total_correct_by_dataset_train:
+            #     total_correct_by_dataset_train = correct_by_dataset
+            # else:
+            for key, val in correct_by_dataset.items():
+                if(key not in total_correct_by_dataset_train):
+                    total_correct_by_dataset_train[key] = {}
+                for key2, val2 in val.items():
+                    if(key2 not in total_correct_by_dataset_train[key]):
+                        total_correct_by_dataset_train[key][key2] = 0
+                    total_correct_by_dataset_train[key][key2] += val2
 
-            train_correct += corrects
-            positive += positive_class
-            negative += negative_class
+            train_correct += correct
+            train_total += (positive_class + negative_class)
+            train_positive_total += positive_class
+            train_positive_correct += correct_positive
+            train_negative_total += negative_class
+            train_negative_correct += correct_negative
 
             optimizer.zero_grad()
             loss.backward()
@@ -178,9 +184,15 @@ if __name__ == "__main__":
             # Log training losses
             if(global_step % log_tb_training_steps == 0):
                 writer.add_scalar('Train/Loss: ', loss.item(), global_step)
+                writer.add_scalar('Train/LR', learning_rate, global_step)
+                writer.add_scalar('Train/Accuracy', train_correct/train_total, global_step)
+                writer.add_scalar('Train/Accuracy - Positive', train_positive_correct/train_positive_total, global_step)
+                writer.add_scalar('Train/Accuracy - Negative', train_negative_correct/train_negative_total, global_step)
+                writer.add_scalar('Train/Positive vs Negative', train_positive_total/train_negative_total, global_step)
+
                 for correct_by_dataset_key, correct_by_dataset_value in total_correct_by_dataset_train.items():
-                    TB_var_name_pos = "Train/Accuracy Positive - " + correct_by_dataset_key
-                    TB_var_name_neg = "Train/Accuracy Negative - " + correct_by_dataset_key
+                    TB_var_name_pos = "Train Demographics/Accuracy Positive - " + correct_by_dataset_key
+                    TB_var_name_neg = "Train Demographics/Accuracy Negative - " + correct_by_dataset_key
                     if((correct_by_dataset_value["total_positive"] > 0)):
                         positive_accuracy = correct_by_dataset_value["correct_positive"]/(correct_by_dataset_value["total_positive"])
                         writer.add_scalar(TB_var_name_pos, positive_accuracy, global_step)
@@ -188,9 +200,6 @@ if __name__ == "__main__":
                         negative_accuracy = correct_by_dataset_value["correct_negative"]/(correct_by_dataset_value["total_negative"])
                         writer.add_scalar(TB_var_name_neg, negative_accuracy, global_step)
                 
-                writer.add_scalar('Train/LR', learning_rate, global_step)
-                writer.add_scalar('Train/Accuracy', corrects/config['training']['bs'], global_step)
-
                 # Log images to investigate augmentations, labels, datasets, demographics, etc
                 for image_index in range(0, num_log_images):
 
@@ -230,8 +239,12 @@ if __name__ == "__main__":
 
                 # Reset logging dictionary so we can refill from scratch
                 total_correct_by_dataset_train = {}
-
-                # Log images along with dataset, image path, label, prediction, and demographic information
+                train_correct = 0
+                train_total = 0
+                train_positive_total = 0
+                train_positive_correct = 0
+                train_negative_total = 0
+                train_negative_correct = 0
 
 
             # Update Console Bar
@@ -240,15 +253,20 @@ if __name__ == "__main__":
 
             # Print values to console
             if index%100 == 0:
-                print("\nLoss: ", total_loss/counter, "Accuracy: ",train_correct/(counter*config['training']['bs']) ,"Train 0s: ", negative, "Train 1s:", positive)  
+                print("\nLoss: ", total_loss/counter)  
 
             # Run and log evaluation
             if global_step % evaluation_steps == 0:
                 print("Evaluating data")
+
                 val_counter = 0
-                val_correct = 0
-                val_positive = 0
-                val_negative = 0
+                val_correct_all = 0
+                val_total = 0
+                val_positive_total = 0
+                val_positive_correct = 0
+                val_negative_total = 0
+                val_negative_correct = 0
+                
                 model.eval()
                 total_correct_by_dataset_eval = {}
                 for index, (val_images, val_labels, val_image_path_names) in enumerate(val_dl):
@@ -261,29 +279,38 @@ if __name__ == "__main__":
                     val_pred = val_pred.cpu()
                     val_loss = loss_fn(val_pred, val_labels)
                     total_val_loss += round(val_loss.item(), 2)
-                    val_corrects, val_positive_class, val_negative_class = check_correct(val_pred, val_labels)
+                    val_correct, val_correct_positive, val_correct_negative, val_positive_class, val_negative_class = check_correct(val_pred, val_labels)
 
-                    correct_by_dataset = check_correct_with_paths(y_pred, labels, image_path_names)  
-                    if not total_correct_by_dataset_eval:
-                        total_correct_by_dataset_eval = correct_by_dataset
-                    else:
-                        for key, val in correct_by_dataset.items():
-                            for key2, val2 in val.items():
-                                total_correct_by_dataset_eval[key][key2] += val2
+                    correct_by_dataset = check_correct_with_paths(val_pred, val_labels, val_image_path_names)  
+                    # if not total_correct_by_dataset_eval:
+                    #     total_correct_by_dataset_eval = correct_by_dataset
+                    # else:
+                    #     for key, val in correct_by_dataset.items():
+                    #         for key2, val2 in val.items():
+                    #             total_correct_by_dataset_eval[key][key2] += val2
 
-                    val_correct += val_corrects
-                    val_positive += val_positive_class
-                    val_negative += val_negative_class
+                    for key, val in correct_by_dataset.items():
+                        if(key not in total_correct_by_dataset_eval):
+                            total_correct_by_dataset_eval[key] = {}
+                        for key2, val2 in val.items():
+                            if(key2 not in total_correct_by_dataset_eval[key]):
+                                total_correct_by_dataset_eval[key][key2] = 0
+                            total_correct_by_dataset_eval[key][key2] += val2
+
+                    val_correct_all += val_correct
+                    val_total += (val_positive_class + val_negative_class)
+                    val_positive_total += val_positive_class
+                    val_positive_correct += val_correct_positive
+                    val_negative_total += val_negative_class
+                    val_negative_correct += val_correct_negative
+
                     val_counter += 1
+
                     bar.next()
                     
-                
-                
-
                 total_val_loss /= val_counter
-                val_correct /= val_counter
                 if previous_loss <= total_val_loss:
-                    print("Validation loss did not improved")
+                    print("Validation loss did not improve")
                     not_improved_loss += 1
                 else:
                     not_improved_loss = 0
@@ -291,18 +318,22 @@ if __name__ == "__main__":
                 previous_loss = total_val_loss
 
                 writer.add_scalar('Eval/Loss: ', total_val_loss, global_step)
+                writer.add_scalar('Eval/LR', learning_rate, global_step)
+                writer.add_scalar('Eval/Accuracy', val_correct_all/val_total, global_step)
+                writer.add_scalar('Eval/Accuracy - Positive', val_positive_correct/val_positive_total, global_step)
+                writer.add_scalar('Eval/Accuracy - Negative', val_negative_correct/val_negative_total, global_step)
+                writer.add_scalar('Eval/Positive vs Negative', val_positive_total/val_negative_total, global_step)
+
                 for correct_by_dataset_key, correct_by_dataset_value in total_correct_by_dataset_eval.items():
-                    TB_var_name_pos = "Eval/Accuracy Positive - " + correct_by_dataset_key
-                    TB_var_name_neg = "Eval/Accuracy Negative - " + correct_by_dataset_key
+                    TB_var_name_pos = "Eval Demographics/Accuracy Positive - " + correct_by_dataset_key
+                    TB_var_name_neg = "Eval Demographics/Accuracy Negative - " + correct_by_dataset_key
                     if((correct_by_dataset_value["total_positive"] > 0)):
                         positive_accuracy = correct_by_dataset_value["correct_positive"]/(correct_by_dataset_value["total_positive"])
                         writer.add_scalar(TB_var_name_pos, positive_accuracy, global_step)
                     if((correct_by_dataset_value["total_negative"] > 0)):
                         negative_accuracy = correct_by_dataset_value["correct_negative"]/(correct_by_dataset_value["total_negative"])
                         writer.add_scalar(TB_var_name_neg, negative_accuracy, global_step)
-                
-                writer.add_scalar('Eval/LR', learning_rate, global_step)
-                writer.add_scalar('Eval/Accuracy', val_correct/config['training']['bs'], global_step)
+
 
                 # Log images to investigate augmentations, labels, datasets, demographics, etc
                 for image_index in range(0, num_log_images):
