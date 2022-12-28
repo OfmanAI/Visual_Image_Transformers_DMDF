@@ -1,0 +1,13 @@
+dmdf_v2/
+dmdf_v2/**
+Checkpoints/
+Checkpoints/**
+logs/
+Logs/
+logs2/
+logs2/**
+__pycache__/
+CE-Vit-Exp8/
+dmdf_v2_evaluation_results/
+experiment_log.txt
+*.csv
